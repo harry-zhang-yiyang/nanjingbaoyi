@@ -3,66 +3,26 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>单选外部选项测试</title>
+  <title>审批外部选项调试版</title>
   <style>
-    :root {
-      --bg: #ffffff;
-      --fg: #222;
-      --card: #f4f4f5;
-      --primary: #2563eb;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #0f172a;
-        --fg: #e2e8f0;
-        --card: #1e293b;
-      }
-    }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--fg);
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      padding: 1.2rem;
-    }
-    h3 { margin-bottom: 1rem; }
-    .option {
-      background: var(--card);
-      border-radius: .6rem;
-      padding: .6rem .8rem;
-      margin-bottom: .6rem;
-      display: flex;
-      align-items: center;
-      gap: .5rem;
-      cursor: pointer;
-    }
-    .option input {
-      width: 1rem;
-      height: 1rem;
-    }
-    button {
-      margin-top: 1rem;
-      padding: .6rem 1.2rem;
-      background: var(--primary);
-      color: #fff;
-      border: none;
-      border-radius: .5rem;
-      font-size: .9rem;
-    }
+    body { font-family: system-ui, sans-serif; padding: 1rem; }
+    .opt { border: 1px solid #ddd; padding: .6rem .8rem; border-radius: .5rem; margin-bottom: .5rem; display: flex; gap: .5rem; align-items: center; }
+    button { margin-top: 1rem; padding: .5rem 1rem; }
+    #log { margin-top: 1rem; font-size: .75rem; white-space: pre-wrap; background: #f6f6f6; padding: .5rem; border-radius: .4rem; }
   </style>
 </head>
 <body>
   <h3>请选择一个选项（A / B / C）</h3>
   <div id="list"></div>
-  <button id="okBtn">确定</button>
+  <button id="saveBtn">保存到审批</button>
+  <div id="log"></div>
 
   <script>
-    // 1. 从URL拿key和selectorType
     const url = new URL(location.href);
     const key = url.searchParams.get('key') || '';
     const selectorType = url.searchParams.get('selectorType') || 'single';
+    const logEl = document.getElementById('log');
 
-    // 2. 我们的测试选项：A/B/C
     const data = [
       { key: 'a', value: 'A' },
       { key: 'b', value: 'B' },
@@ -71,89 +31,116 @@
 
     let selectedKey = null;
 
-    const listEl = document.getElementById('list');
-
-    // 3. 先获取已经选择的（新版接口也是 getApprovalSelectedItems）
-    if (typeof ww !== 'undefined' && ww.getApprovalSelectedItems) {
-      ww.getApprovalSelectedItems({
-        key,
-        success(res) {
-          // 按你文档的风格，这里一般也是 selectedData / items，看实际返回
-          const arr = res.selectedData || res.items || [];
-          if (arr.length > 0) {
-            selectedKey = arr[0].key;
-          }
-          render();
-        },
-        fail() {
-          render();
-        }
-      });
-    } else {
-      // 本地浏览器直接开就走这里
-      render();
+    function log(msg, obj) {
+      logEl.textContent += msg + (obj ? (' ' + JSON.stringify(obj)) : '') + '\n';
     }
 
+    // 渲染选项
     function render() {
+      const listEl = document.getElementById('list');
       listEl.innerHTML = '';
       data.forEach(item => {
         const div = document.createElement('div');
-        div.className = 'option';
+        div.className = 'opt';
         const input = document.createElement('input');
         input.type = 'radio';
         input.name = 'extopt';
         input.value = item.key;
-        input.checked = (item.key === selectedKey);
+        input.checked = item.key === selectedKey;
         div.appendChild(input);
-        const label = document.createElement('span');
-        label.textContent = item.value;
-        div.appendChild(label);
-
-        div.addEventListener('click', () => {
+        const span = document.createElement('span');
+        span.textContent = item.value;
+        div.appendChild(span);
+        div.onclick = () => {
           selectedKey = item.key;
-          render(); // 重新渲染让radio只勾一个
-        });
-
+          render();
+        };
         listEl.appendChild(div);
       });
     }
 
-    // 4. 保存
-    document.getElementById('okBtn').onclick = async function () {
+    // 一进入页面先看 key
+    log('URL key = ' + key);
+    if (!key) {
+      log('⚠️ 没有拿到 key，企业微信不会给你存/取数据。');
+    }
+
+    // 先尝试获取已选
+    if (typeof ww !== 'undefined' && ww.getApprovalSelectedItems) {
+      log('检测到 ww.getApprovalSelectedItems，可调用。开始获取…');
+      ww.getApprovalSelectedItems({
+        key,
+        success(res) {
+          log('✅ getApprovalSelectedItems success', res);
+          // 按你发的文档，这里是 selectedData: [{key, value}]
+          const sel = res.selectedData || [];
+          if (sel.length > 0) {
+            selectedKey = sel[0].key;
+          }
+          render();
+        },
+        fail(err) {
+          log('❌ getApprovalSelectedItems fail', err);
+          render();
+        }
+      });
+    } else if (typeof wx !== 'undefined' && wx.invoke) {
+      // 旧版 jweixin 走这里
+      log('检测到旧版 wx.invoke，尝试旧版 getApprovalSelectedItems…');
+      wx.invoke('getApprovalSelectedItems', { key }, (res) => {
+        log('旧版 getApprovalSelectedItems 返回', res);
+        if (res.err_msg === 'getApprovalSelectedItems:ok') {
+          try {
+            const sel = res.selectedData ? JSON.parse(res.selectedData) : [];
+            if (sel.length > 0) selectedKey = sel[0].key;
+          } catch (e) {
+            log('解析旧版 selectedData 失败', e);
+          }
+        }
+        render();
+      });
+    } else {
+      log('❌ 当前环境没有 ww / wx，说明你可能是在普通浏览器里打开的，或者域名没进 JS 安全域名。只渲染页面做本地预览。');
+      render();
+    }
+
+    // 保存按钮
+    document.getElementById('saveBtn').onclick = async function () {
       if (!selectedKey) {
         alert('请先选一个');
         return;
       }
-
       const payload = {
-        key, // 审批传过来的key，必须原样传回
+        key,
         selectedData: [
           { key: selectedKey, value: selectedKey.toUpperCase() }
         ]
       };
+      log('准备保存：', payload);
 
       if (typeof ww !== 'undefined' && ww.saveApprovalSelectedItems) {
-        // 新版 promise 风格也兼容
         try {
           const res = await ww.saveApprovalSelectedItems(payload);
-          // 成功的话企业微信一般会自动返回上一层
-          // console.log('保存成功', res);
+          log('✅ saveApprovalSelectedItems success', res);
+          // 成功一般就返回审批了
         } catch (err) {
+          log('❌ saveApprovalSelectedItems fail', err);
           alert('保存失败：' + JSON.stringify(err));
         }
       } else if (typeof wx !== 'undefined' && wx.invoke) {
-        // 旧版 jweixin 调用法
+        // 旧版
         wx.invoke('saveApprovalSelectedItems', {
           key,
           selectedData: JSON.stringify(payload.selectedData)
         }, (res) => {
+          log('旧版 save 返回', res);
           if (res.err_msg !== 'saveApprovalSelectedItems:ok') {
             alert('旧版保存失败：' + JSON.stringify(res));
           }
         });
       } else {
-        // 纯浏览器调试
-        alert('调试模式：将要保存的数据是\n' + JSON.stringify(payload, null, 2));
+        log('❌ 没有 ww / wx，不能真正保存，只打印。');
+        alert('调试模式：' + JSON.stringify(payload, null, 2));
       }
     };
   </script>
