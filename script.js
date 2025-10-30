@@ -13,19 +13,20 @@ const { selectorType = 'single' } = getUrlParams(); // 默认单选
 fetch('product-ids.json')
   .then(res => res.json())
   .then(productIds => {
-    const list = document.getElementById('productList');
     // 循环生成单选/多选框
-    productIds.forEach(id => {
-      const item = document.createElement('div');
-      item.style.margin = '10px 0';
-      // 根据selectorType渲染单选（radio）或多选（checkbox）
-      item.innerHTML = `
-        <input type="${selectorType === 'single' ? 'radio' : 'checkbox'}" 
-               name="products" value="${id}" id="id-${id}">
-        <label for="id-${id}" style="margin-left: 8px;">${id}</label>
-      `;
-      list.appendChild(item);
-    });
+    const productIds = ["DG-0221", "DG-0238", "DG-0245"]; // 直接写死几个测试编号
+    const list = document.getElementById('productList');
+// 循环生成单选/多选框（后面的代码不变）
+productIds.forEach(id => {
+  const item = document.createElement('div');
+  item.style.margin = '10px 0';
+  item.innerHTML = `
+    <input type="${selectorType === 'single' ? 'radio' : 'checkbox'}" 
+           name="products" value="${id}" id="id-${id}">
+    <label for="id-${id}" style="margin-left: 8px;">${id}</label>
+  `;
+  list.appendChild(item);
+});
 
     // 初始化：获取已选择的商品编号并回显
     ww.getApprovalSelectedItems({
