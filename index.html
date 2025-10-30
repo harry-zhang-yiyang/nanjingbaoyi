@@ -5,23 +5,36 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>单选外部选项测试</title>
   <style>
+    :root {
+      --bg: #ffffff;
+      --fg: #222;
+      --card: #f4f4f5;
+      --primary: #2563eb;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f172a;
+        --fg: #e2e8f0;
+        --card: #1e293b;
+      }
+    }
     body {
-      font-family: system-ui, sans-serif;
       margin: 0;
-      background: #fff;
-      color: #222;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       padding: 1.2rem;
     }
     h3 { margin-bottom: 1rem; }
     .option {
+      background: var(--card);
+      border-radius: .6rem;
       padding: .6rem .8rem;
-      border: 1px solid #ddd;
-      border-radius: .5rem;
       margin-bottom: .6rem;
-      cursor: pointer;
       display: flex;
       align-items: center;
       gap: .5rem;
+      cursor: pointer;
     }
     .option input {
       width: 1rem;
@@ -30,83 +43,117 @@
     button {
       margin-top: 1rem;
       padding: .6rem 1.2rem;
-      background: #2563eb;
+      background: var(--primary);
       color: #fff;
       border: none;
-      border-radius: .4rem;
+      border-radius: .5rem;
       font-size: .9rem;
-      cursor: pointer;
     }
   </style>
 </head>
 <body>
-  <h3>请选择一个选项（A/B/C）</h3>
-  <div id="options"></div>
+  <h3>请选择一个选项（A / B / C）</h3>
+  <div id="list"></div>
   <button id="okBtn">确定</button>
 
   <script>
-    // 1. 解析企业微信传过来的参数
+    // 1. 从URL拿key和selectorType
     const url = new URL(location.href);
     const key = url.searchParams.get('key') || '';
     const selectorType = url.searchParams.get('selectorType') || 'single';
 
-    // 2. 模拟单选项数据
+    // 2. 我们的测试选项：A/B/C
     const data = [
-      { id: 'a', name: 'A' },
-      { id: 'b', name: 'B' },
-      { id: 'c', name: 'C' }
+      { key: 'a', value: 'A' },
+      { key: 'b', value: 'B' },
+      { key: 'c', value: 'C' },
     ];
-    let selectedId = null;
 
-    const listEl = document.getElementById('options');
+    let selectedKey = null;
 
-    // 3. 如果支持接口，先获取已选项
+    const listEl = document.getElementById('list');
+
+    // 3. 先获取已经选择的（新版接口也是 getApprovalSelectedItems）
     if (typeof ww !== 'undefined' && ww.getApprovalSelectedItems) {
       ww.getApprovalSelectedItems({
         key,
         success(res) {
-          if (res.items && res.items[0]) {
-            selectedId = res.items[0].id;
+          // 按你文档的风格，这里一般也是 selectedData / items，看实际返回
+          const arr = res.selectedData || res.items || [];
+          if (arr.length > 0) {
+            selectedKey = arr[0].key;
           }
           render();
         },
-        fail() { render(); }
+        fail() {
+          render();
+        }
       });
     } else {
+      // 本地浏览器直接开就走这里
       render();
     }
 
-    // 渲染列表
     function render() {
       listEl.innerHTML = '';
       data.forEach(item => {
         const div = document.createElement('div');
         div.className = 'option';
-        div.innerHTML = `
-          <input type="radio" name="opt" value="${item.id}" ${item.id === selectedId ? 'checked' : ''}/>
-          <label>${item.name}</label>
-        `;
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.name = 'extopt';
+        input.value = item.key;
+        input.checked = (item.key === selectedKey);
+        div.appendChild(input);
+        const label = document.createElement('span');
+        label.textContent = item.value;
+        div.appendChild(label);
+
         div.addEventListener('click', () => {
-          selectedId = item.id;
-          render();
+          selectedKey = item.key;
+          render(); // 重新渲染让radio只勾一个
         });
+
         listEl.appendChild(div);
       });
     }
 
-    // 4. 点击确定保存选择
-    document.getElementById('okBtn').onclick = function () {
-      const items = selectedId ? [{ id: selectedId, name: selectedId.toUpperCase() }] : [];
+    // 4. 保存
+    document.getElementById('okBtn').onclick = async function () {
+      if (!selectedKey) {
+        alert('请先选一个');
+        return;
+      }
+
+      const payload = {
+        key, // 审批传过来的key，必须原样传回
+        selectedData: [
+          { key: selectedKey, value: selectedKey.toUpperCase() }
+        ]
+      };
+
       if (typeof ww !== 'undefined' && ww.saveApprovalSelectedItems) {
-        ww.saveApprovalSelectedItems({
+        // 新版 promise 风格也兼容
+        try {
+          const res = await ww.saveApprovalSelectedItems(payload);
+          // 成功的话企业微信一般会自动返回上一层
+          // console.log('保存成功', res);
+        } catch (err) {
+          alert('保存失败：' + JSON.stringify(err));
+        }
+      } else if (typeof wx !== 'undefined' && wx.invoke) {
+        // 旧版 jweixin 调用法
+        wx.invoke('saveApprovalSelectedItems', {
           key,
-          items,
-          success() { /* 企业微信自动关闭窗口 */ },
-          fail(err) { alert('保存失败: ' + JSON.stringify(err)); }
+          selectedData: JSON.stringify(payload.selectedData)
+        }, (res) => {
+          if (res.err_msg !== 'saveApprovalSelectedItems:ok') {
+            alert('旧版保存失败：' + JSON.stringify(res));
+          }
         });
       } else {
-        // 本地调试用
-        alert('选中了: ' + selectedId);
+        // 纯浏览器调试
+        alert('调试模式：将要保存的数据是\n' + JSON.stringify(payload, null, 2));
       }
     };
   </script>
